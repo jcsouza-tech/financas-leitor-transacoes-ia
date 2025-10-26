@@ -1,0 +1,24 @@
+{
+  "family": "mysql-create-db",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::772160502222:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "mysql-create-db",
+      "image": "mysql:8.0",
+      "essential": true,
+      "command": ["sh", "-c", "mysql -h financas-prd-mysql.cyr6a800ez9a.us-east-1.rds.amazonaws.com -u appuser -pDeleterio_Prod_Faus_8343_#$ -e 'CREATE DATABASE IF NOT EXISTS financas_prd_mysql; SHOW DATABASES;'"],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mysql-create-db",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

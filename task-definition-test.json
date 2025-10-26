@@ -1,0 +1,28 @@
+{
+  "family": "financas-leitor-transacoes-ia",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::772160502222:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "leitor-transacoes-ia",
+      "image": "openjdk:17-jre-slim",
+      "essential": true,
+      "portMappings": [{"containerPort": 8080, "protocol": "tcp"}],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/financas-leitor-transacoes-ia",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "command": ["sh", "-c", "echo 'Test container running' && sleep 3600"],
+      "environment": [
+        {"name": "TEST", "value": "true"}
+      ]
+    }
+  ]
+}

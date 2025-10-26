@@ -1,0 +1,24 @@
+{
+  "family": "mysql-check-dbs",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::772160502222:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "mysql-check-dbs",
+      "image": "mysql:8.0",
+      "essential": true,
+      "command": ["sh", "-c", "mysql -h financas-prd-mysql.cyr6a800ez9a.us-east-1.rds.amazonaws.com -u appuser -pDeleterio_Prod_Faus_8343_#$ -e 'SHOW DATABASES; SELECT DATABASE();'"],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mysql-check-dbs",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

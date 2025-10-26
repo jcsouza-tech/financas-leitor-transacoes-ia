@@ -1,0 +1,86 @@
+﻿{
+    "taskDefinitionArn":  "arn:aws:ecs:us-east-1:772160502222:task-definition/financas-leitor-transacoes-ia:7",
+    "containerDefinitions":  [
+                                 {
+                                     "name":  "leitor-transacoes-ia",
+                                     "image":  "jcsouzafirst/financas-leitor-transacoes-ia:latest",
+                                     "cpu":  0,
+                                     "portMappings":  [
+                                                          {
+                                                              "containerPort":  8080,
+                                                              "hostPort":  8080,
+                                                              "protocol":  "tcp"
+                                                          }
+                                                      ],
+                                     "essential":  true,
+                                     "command":  [
+                                                     "sh",
+                                                     "-c",
+                                                     "echo \u0027Test container running\u0027 \u0026\u0026 sleep 3600"
+                                                 ],
+                                     "environment":  [
+                                                         {
+                                                             "name":  "TEST",
+                                                             "value":  "true"
+                                                         }
+                                                     ],
+                                     "mountPoints":  [
+
+                                                     ],
+                                     "volumesFrom":  [
+
+                                                     ],
+                                     "logConfiguration":  {
+                                                              "logDriver":  "awslogs",
+                                                              "options":  {
+                                                                              "awslogs-group":  "/ecs/financas-leitor-transacoes-ia",
+                                                                              "awslogs-region":  "us-east-1",
+                                                                              "awslogs-stream-prefix":  "ecs"
+                                                                          }
+                                                          },
+                                     "systemControls":  [
+
+                                                        ]
+                                 }
+                             ],
+    "family":  "financas-leitor-transacoes-ia",
+    "executionRoleArn":  "arn:aws:iam::772160502222:role/ecsTaskExecutionRole",
+    "networkMode":  "awsvpc",
+    "revision":  7,
+    "volumes":  [
+
+                ],
+    "status":  "ACTIVE",
+    "requiresAttributes":  [
+                               {
+                                   "name":  "com.amazonaws.ecs.capability.logging-driver.awslogs"
+                               },
+                               {
+                                   "name":  "ecs.capability.execution-role-awslogs"
+                               },
+                               {
+                                   "name":  "com.amazonaws.ecs.capability.docker-remote-api.1.19"
+                               },
+                               {
+                                   "name":  "com.amazonaws.ecs.capability.docker-remote-api.1.18"
+                               },
+                               {
+                                   "name":  "ecs.capability.task-eni"
+                               }
+                           ],
+    "placementConstraints":  [
+
+                             ],
+    "compatibilities":  [
+                            "EC2",
+                            "MANAGED_INSTANCES",
+                            "FARGATE"
+                        ],
+    "requiresCompatibilities":  [
+                                    "FARGATE"
+                                ],
+    "cpu":  "512",
+    "memory":  "1024",
+    "registeredAt":  "2025-10-25T23:40:09.855000-03:00",
+    "registeredBy":  "arn:aws:iam::772160502222:user/financas-app"
+}

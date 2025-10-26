@@ -1,0 +1,106 @@
+﻿{
+    "taskDefinitionArn":  "arn:aws:ecs:us-east-1:772160502222:task-definition/financas-leitor-transacoes-ia:4",
+    "containerDefinitions":  [
+                                 {
+                                     "name":  "leitor-transacoes-ia",
+                                     "image":  "jcsouza-tech/financas-leitor-transacoes-ia:latest",
+                                     "cpu":  0,
+                                     "portMappings":  [
+                                                          {
+                                                              "containerPort":  8080,
+                                                              "hostPort":  8080,
+                                                              "protocol":  "tcp"
+                                                          }
+                                                      ],
+                                     "essential":  true,
+                                     "environment":  [
+                                                         {
+                                                             "name":  "SPRING_DATASOURCE_USERNAME",
+                                                             "value":  "appuser"
+                                                         },
+                                                         {
+                                                             "name":  "AI_PROVIDER",
+                                                             "value":  "gemini"
+                                                         },
+                                                         {
+                                                             "name":  "SPRING_DATASOURCE_URL",
+                                                             "value":  "jdbc:mysql://financas-prd-mysql.cyr6a800ez9a.us-east-1.rds.amazonaws.com:3306/financas-prd-mysql"
+                                                         },
+                                                         {
+                                                             "name":  "SPRING_PROFILES_ACTIVE",
+                                                             "value":  "prod"
+                                                         },
+                                                         {
+                                                             "name":  "FLYWAY_ENABLED",
+                                                             "value":  "false"
+                                                         }
+                                                     ],
+                                     "mountPoints":  [
+
+                                                     ],
+                                     "volumesFrom":  [
+
+                                                     ],
+                                     "secrets":  [
+                                                     {
+                                                         "name":  "SPRING_DATASOURCE_PASSWORD",
+                                                         "valueFrom":  "arn:aws:secretsmanager:us-east-1:772160502222:secret:financas/leitor-transacoes-ia/prod/database"
+                                                     }
+                                                 ],
+                                     "logConfiguration":  {
+                                                              "logDriver":  "awslogs",
+                                                              "options":  {
+                                                                              "awslogs-group":  "/ecs/financas-leitor-transacoes-ia",
+                                                                              "awslogs-region":  "us-east-1",
+                                                                              "awslogs-stream-prefix":  "ecs"
+                                                                          }
+                                                          },
+                                     "systemControls":  [
+
+                                                        ]
+                                 }
+                             ],
+    "family":  "financas-leitor-transacoes-ia",
+    "executionRoleArn":  "arn:aws:iam::772160502222:role/ecsTaskExecutionRole",
+    "networkMode":  "awsvpc",
+    "revision":  4,
+    "volumes":  [
+
+                ],
+    "status":  "ACTIVE",
+    "requiresAttributes":  [
+                               {
+                                   "name":  "com.amazonaws.ecs.capability.logging-driver.awslogs"
+                               },
+                               {
+                                   "name":  "ecs.capability.execution-role-awslogs"
+                               },
+                               {
+                                   "name":  "com.amazonaws.ecs.capability.docker-remote-api.1.19"
+                               },
+                               {
+                                   "name":  "ecs.capability.secrets.asm.environment-variables"
+                               },
+                               {
+                                   "name":  "com.amazonaws.ecs.capability.docker-remote-api.1.18"
+                               },
+                               {
+                                   "name":  "ecs.capability.task-eni"
+                               }
+                           ],
+    "placementConstraints":  [
+
+                             ],
+    "compatibilities":  [
+                            "EC2",
+                            "MANAGED_INSTANCES",
+                            "FARGATE"
+                        ],
+    "requiresCompatibilities":  [
+                                    "FARGATE"
+                                ],
+    "cpu":  "512",
+    "memory":  "1024",
+    "registeredAt":  "2025-10-25T23:04:58.748000-03:00",
+    "registeredBy":  "arn:aws:iam::772160502222:user/financas-app"
+}
