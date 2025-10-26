@@ -1,0 +1,32 @@
+{
+  "family": "financas-migrations-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::772160502222:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "migrations",
+      "image": "772160502222.dkr.ecr.us-east-1.amazonaws.com/financas-leitor-transacoes-ia-migrations:latest",
+      "essential": true,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/financas-migrations",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "environment": [
+        {"name": "ENVIRONMENT", "value": "prod"},
+        {"name": "APPLICATION", "value": "leitor-transacoes-ia"}
+      ],
+      "secrets": [
+        {"name": "FLYWAY_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:772160502222:secret:financas/leitor-transacoes-ia/prod/database:host::"},
+        {"name": "FLYWAY_USER", "valueFrom": "arn:aws:secretsmanager:us-east-1:772160502222:secret:financas/leitor-transacoes-ia/prod/database:username::"},
+        {"name": "FLYWAY_PASSWORD", "valueFrom": "arn:aws:secretsmanager:us-east-1:772160502222:secret:financas/leitor-transacoes-ia/prod/database:password::"}
+      ]
+    }
+  ]
+}

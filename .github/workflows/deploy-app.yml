@@ -202,7 +202,7 @@ jobs:
               --task-definition $SERVICE_NAME \
               --desired-count 1 \
               --launch-type FARGATE \
-              --network-configuration "awsvpcConfiguration={subnets=[${{ steps.set-env.outputs.subnet_id }}],securityGroups=[sg-0f74f8203a1b3a3af],assignPublicIp=ENABLED}" \
+              --network-configuration "awsvpcConfiguration={subnets=[${{ steps.set-env.outputs.subnet_id }}],securityGroups=[sg-0f74f8203a1b3a3af],assignPublicIp=DISABLED}" \
               --region us-east-1
             
             echo "✅ Service created"
