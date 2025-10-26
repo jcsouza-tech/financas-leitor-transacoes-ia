@@ -1,5 +1,6 @@
 package br.com.financas.leitor_transacoes_ia.security;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -8,20 +9,28 @@ import org.springframework.stereotype.Component;
 
 /**
  * Classe utilitária para obter informações do usuário autenticado do SecurityContext.
- * Extrai o userId (sub claim) do JWT token do Cognito.
+ * Extrai o userId (sub claim) do JWT token do Cognito ou usa usuário hardcoded quando segurança desabilitada.
  */
 @Component
 public class UserContext {
 
-    private static final String DEFAULT_USER_ID = "local-user";
+    private static final String DEFAULT_USER_ID = "user-123-hardcoded";
     private static final String SUB_CLAIM = "sub";
+
+    @Value("${security.enabled:true}")
+    private boolean securityEnabled;
 
     /**
      * Obtém o ID do usuário atual do SecurityContext.
      * 
-     * @return userId extraído do JWT token ou "local-user" para desenvolvimento local
+     * @return userId extraído do JWT token ou usuário hardcoded quando segurança desabilitada
      */
-    public static String getCurrentUserId() {
+    public String getCurrentUserId() {
+        // Se segurança desabilitada, retorna usuário hardcoded
+        if (!securityEnabled) {
+            return DEFAULT_USER_ID;
+        }
+
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         
         if (authentication == null || !authentication.isAuthenticated()) {
@@ -49,7 +58,12 @@ public class UserContext {
      * 
      * @return true se autenticado, false caso contrário
      */
-    public static boolean isAuthenticated() {
+    public boolean isAuthenticated() {
+        // Se segurança desabilitada, sempre considera autenticado
+        if (!securityEnabled) {
+            return true;
+        }
+
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         return authentication != null && authentication.isAuthenticated() 
             && !"anonymousUser".equals(authentication.getName());
@@ -60,7 +74,12 @@ public class UserContext {
      * 
      * @return email do usuário ou null se não disponível
      */
-    public static String getCurrentUserEmail() {
+    public String getCurrentUserEmail() {
+        // Se segurança desabilitada, retorna email padrão
+        if (!securityEnabled) {
+            return "hardcoded@user.com";
+        }
+
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         
         if (authentication instanceof JwtAuthenticationToken) {

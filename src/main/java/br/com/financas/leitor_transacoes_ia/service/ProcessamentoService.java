@@ -19,6 +19,7 @@ import java.util.UUID;
 public class ProcessamentoService {
 
     private final ProcessamentoRepository processamentoRepository;
+    private final UserContext userContext;
 
     /**
      * Cria um novo processamento
@@ -26,7 +27,7 @@ public class ProcessamentoService {
     @Transactional
     public Processamento criarProcessamento(String nomeArquivo, String banco, String moeda, String tipoDocumento) {
         String processamentoId = UUID.randomUUID().toString();
-        String userId = UserContext.getCurrentUserId();
+        String userId = userContext.getCurrentUserId();
         
         Processamento processamento = Processamento.builder()
                 .processamentoId(processamentoId)
@@ -51,7 +52,7 @@ public class ProcessamentoService {
      */
     @Transactional
     public Processamento atualizarStatus(String processamentoId, Processamento.StatusProcessamento status) {
-        String userId = UserContext.getCurrentUserId();
+        String userId = userContext.getCurrentUserId();
         Optional<Processamento> optional = processamentoRepository.findByUserIdAndProcessamentoId(userId, processamentoId);
         
         if (optional.isPresent()) {
@@ -87,7 +88,7 @@ public class ProcessamentoService {
      */
     @Transactional
     public Processamento atualizarProgresso(String processamentoId, Integer progresso) {
-        String userId = UserContext.getCurrentUserId();
+        String userId = userContext.getCurrentUserId();
         Optional<Processamento> optional = processamentoRepository.findByUserIdAndProcessamentoId(userId, processamentoId);
         
         if (optional.isPresent()) {
@@ -112,7 +113,7 @@ public class ProcessamentoService {
                                                Integer transacoesProcessadas, 
                                                Integer transacoesSalvas, 
                                                Integer duplicatasIgnoradas) {
-        String userId = UserContext.getCurrentUserId();
+        String userId = userContext.getCurrentUserId();
         Optional<Processamento> optional = processamentoRepository.findByUserIdAndProcessamentoId(userId, processamentoId);
         
         if (optional.isPresent()) {
@@ -143,7 +144,7 @@ public class ProcessamentoService {
      */
     @Transactional
     public Processamento adicionarErro(String processamentoId, String erro) {
-        String userId = UserContext.getCurrentUserId();
+        String userId = userContext.getCurrentUserId();
         Optional<Processamento> optional = processamentoRepository.findByUserIdAndProcessamentoId(userId, processamentoId);
         
         if (optional.isPresent()) {
@@ -166,7 +167,7 @@ public class ProcessamentoService {
      * Lista todos os processamentos do usuário atual
      */
     public List<Processamento> listarProcessamentos() {
-        String userId = UserContext.getCurrentUserId();
+        String userId = userContext.getCurrentUserId();
         return processamentoRepository.findByUserId(userId);
     }
 
@@ -174,7 +175,7 @@ public class ProcessamentoService {
      * Busca processamento por ID (do usuário atual)
      */
     public Optional<Processamento> buscarPorId(String processamentoId) {
-        String userId = UserContext.getCurrentUserId();
+        String userId = userContext.getCurrentUserId();
         return processamentoRepository.findByUserIdAndProcessamentoId(userId, processamentoId);
     }
 
@@ -182,7 +183,7 @@ public class ProcessamentoService {
      * Lista processamentos por status (do usuário atual)
      */
     public List<Processamento> listarPorStatus(Processamento.StatusProcessamento status) {
-        String userId = UserContext.getCurrentUserId();
+        String userId = userContext.getCurrentUserId();
         return processamentoRepository.findByUserIdAndStatus(userId, status);
     }
 
@@ -191,7 +192,7 @@ public class ProcessamentoService {
      */
     @Transactional
     public Processamento cancelarProcessamento(String processamentoId) {
-        String userId = UserContext.getCurrentUserId();
+        String userId = userContext.getCurrentUserId();
         Optional<Processamento> optional = processamentoRepository.findByUserIdAndProcessamentoId(userId, processamentoId);
         
         if (optional.isPresent()) {
