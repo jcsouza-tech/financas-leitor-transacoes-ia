@@ -22,7 +22,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: financas-leitor-transacoes-ia
+  DOCKER_HUB_REPOSITORY: jcsouza-tech/financas-leitor-transacoes-ia
 
 jobs:
   build-and-push:
@@ -32,35 +32,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
       - name: Build Docker image
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           echo "🏗️ Building Docker image..."
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker build -t ${{ env.DOCKER_HUB_REPOSITORY }}:$IMAGE_TAG .
+          docker tag ${{ env.DOCKER_HUB_REPOSITORY }}:$IMAGE_TAG ${{ env.DOCKER_HUB_REPOSITORY }}:latest
           echo "✅ Image built successfully"
 
       - name: Push Docker image
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "📤 Pushing image to ECR..."
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "📤 Pushing image to Docker Hub..."
+          docker push ${{ env.DOCKER_HUB_REPOSITORY }}:$IMAGE_TAG
+          docker push ${{ env.DOCKER_HUB_REPOSITORY }}:latest
           echo "✅ Image pushed successfully"
 
   deploy:
@@ -118,7 +111,6 @@ jobs:
 
       - name: Update ECS Task Definition
         env:
-          ECR_REGISTRY: 772160502222.dkr.ecr.us-east-1.amazonaws.com
           IMAGE_TAG: ${{ github.sha }}
           ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
           CLUSTER_NAME: ${{ steps.set-env.outputs.cluster_name }}
@@ -152,7 +144,7 @@ jobs:
             } | with_entries(select(.value != null))' > task-definition-filtered.json
             
             # Update image
-            cat task-definition-filtered.json | jq ".containerDefinitions[0].image = \"$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG\"" > task-definition-updated.json
+            cat task-definition-filtered.json | jq ".containerDefinitions[0].image = \"${{ env.DOCKER_HUB_REPOSITORY }}:$IMAGE_TAG\"" > task-definition-updated.json
             
             # Register new task definition
             aws ecs register-task-definition \
@@ -174,7 +166,7 @@ jobs:
             "containerDefinitions": [
               {
                 "name": "leitor-transacoes-ia",
-                "image": "$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG",
+                "image": "${{ env.DOCKER_HUB_REPOSITORY }}:$IMAGE_TAG",
                 "essential": true,
                 "portMappings": [{"containerPort": 8080, "protocol": "tcp"}],
                 "logConfiguration": {
