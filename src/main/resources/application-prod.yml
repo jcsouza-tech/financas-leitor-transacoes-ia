@@ -1,0 +1,94 @@
+# Configuração para ambiente de produção (AWS)
+server:
+  port: 8080
+
+# Configurações de segurança
+security:
+  enabled: true
+
+spring:
+  application:
+    name: leitor-transacoes-ia
+  main:
+    allow-bean-definition-overriding: true
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://financas-prd-mysql.cyr6a800ez9a.us-east-1.rds.amazonaws.com:3306/financas-prd-mysql}
+    driverClassName: com.mysql.cj.jdbc.Driver
+    username: ${SPRING_DATASOURCE_USERNAME:appuser}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: false
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI}
+          jwk-set-uri: ${JWT_JWK_SET_URI}
+  # Flyway Database Migration Configuration
+  flyway:
+    enabled: ${FLYWAY_ENABLED:false}
+    baseline-on-migrate: true
+    baseline-version: 0
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration
+
+cloud:
+  aws:
+    region:
+      static: ${AWS_REGION:us-east-1}
+      sts:
+        enabled: true
+
+# Configurações AWS Cognito para produção
+aws:
+  cognito:
+    user-pool-id: ${AWS_COGNITO_USER_POOL_ID}
+    client-id: ${AWS_COGNITO_CLIENT_ID}
+    region: ${AWS_REGION:us-east-1}
+    sqs:
+      endpoint: ${AWS_SQS_ENDPOINT:}
+      queue:
+        auto-create: true
+      listener:
+        auto-startup: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  zipkin:
+    enabled: false
+  tracing:
+    sampling:
+      probability: 0.1
+
+# Configurações de logging para produção
+logging:
+  level:
+    root: INFO
+    br.com.financas.leitor_transacoes_ia: INFO
+    br.com.financas.leitor_transacoes_ia.security: INFO
+    org.springframework.security: INFO
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
