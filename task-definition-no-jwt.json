@@ -1,0 +1,43 @@
+{
+    "family": "financas-leitor-transacoes-ia",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "512",
+    "memory": "1024",
+    "executionRoleArn": "arn:aws:iam::772160502222:role/ecsTaskExecutionRole",
+    "containerDefinitions": [
+      {
+        "name": "leitor-transacoes-ia",
+        "image": "jcsouzafirst/financas-leitor-transacoes-ia:latest",
+        "essential": true,
+        "portMappings": [
+          {
+            "containerPort": 8080,
+            "protocol": "tcp"
+          }
+        ],
+        "logConfiguration": {
+          "logDriver": "awslogs",
+          "options": {
+            "awslogs-group": "/ecs/financas-leitor-transacoes-ia",
+            "awslogs-region": "us-east-1",
+            "awslogs-stream-prefix": "ecs"
+          }
+        },
+        "environment": [
+          {"name": "SPRING_PROFILES_ACTIVE", "value": "prod-no-security"},
+          {"name": "SPRING_DATASOURCE_URL", "value": "jdbc:mysql://financas-prd-mysql.cyr6a800ez9a.us-east-1.rds.amazonaws.com:3306/mysql"},
+          {"name": "SPRING_DATASOURCE_USERNAME", "value": "appuser"},
+          {"name": "AI_API_KEY", "value": "dummy-key-for-testing"},
+          {"name": "MULTITENANCY_ENABLED", "value": "true"},
+          {"name": "DEFAULT_USER_ID", "value": "user-123-hardcoded"}
+        ],
+        "secrets": [
+          {
+            "name": "SPRING_DATASOURCE_PASSWORD", 
+            "valueFrom": "arn:aws:secretsmanager:us-east-1:772160502222:secret:financas/leitor-transacoes-ia/prod/database:password::"
+          }
+        ]
+      }
+    ]
+  }
