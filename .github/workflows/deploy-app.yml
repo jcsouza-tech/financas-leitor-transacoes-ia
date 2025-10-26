@@ -135,13 +135,34 @@ jobs:
           if aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --query 'services[0].status' --output text 2>/dev/null | grep -q "ACTIVE"; then
             echo "✅ Service exists, updating..."
             
-            # Download current task definition
+            # Download current task definition and filter only required fields
             aws ecs describe-task-definition \
               --task-definition $SERVICE_NAME \
               --query 'taskDefinition' > task-definition.json
             
+            # Filter only the fields needed for register-task-definition
+            cat task-definition.json | jq '{
+              family: .family,
+              taskRoleArn: .taskRoleArn,
+              executionRoleArn: .executionRoleArn,
+              networkMode: .networkMode,
+              containerDefinitions: .containerDefinitions,
+              volumes: .volumes,
+              placementConstraints: .placementConstraints,
+              requiresCompatibilities: .requiresCompatibilities,
+              cpu: .cpu,
+              memory: .memory,
+              tags: .tags,
+              pidMode: .pidMode,
+              ipcMode: .ipcMode,
+              proxyConfiguration: .proxyConfiguration,
+              inferenceAccelerators: .inferenceAccelerators,
+              ephemeralStorage: .ephemeralStorage,
+              runtimePlatform: .runtimePlatform
+            }' > task-definition-filtered.json
+            
             # Update image
-            cat task-definition.json | jq ".containerDefinitions[0].image = \"$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG\"" > task-definition-updated.json
+            cat task-definition-filtered.json | jq ".containerDefinitions[0].image = \"$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG\"" > task-definition-updated.json
             
             # Register new task definition
             aws ecs register-task-definition \
