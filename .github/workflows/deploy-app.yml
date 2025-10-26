@@ -140,26 +140,16 @@ jobs:
               --task-definition $SERVICE_NAME \
               --query 'taskDefinition' > task-definition.json
             
-            # Filter only the fields needed for register-task-definition
+            # Filter only the fields needed for register-task-definition and remove null values
             cat task-definition.json | jq '{
               family: .family,
-              taskRoleArn: .taskRoleArn,
               executionRoleArn: .executionRoleArn,
               networkMode: .networkMode,
               containerDefinitions: .containerDefinitions,
-              volumes: .volumes,
-              placementConstraints: .placementConstraints,
               requiresCompatibilities: .requiresCompatibilities,
               cpu: .cpu,
-              memory: .memory,
-              tags: .tags,
-              pidMode: .pidMode,
-              ipcMode: .ipcMode,
-              proxyConfiguration: .proxyConfiguration,
-              inferenceAccelerators: .inferenceAccelerators,
-              ephemeralStorage: .ephemeralStorage,
-              runtimePlatform: .runtimePlatform
-            }' > task-definition-filtered.json
+              memory: .memory
+            } | with_entries(select(.value != null))' > task-definition-filtered.json
             
             # Update image
             cat task-definition-filtered.json | jq ".containerDefinitions[0].image = \"$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG\"" > task-definition-updated.json
