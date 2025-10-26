@@ -22,7 +22,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  DOCKER_HUB_REPOSITORY: jcsouza-tech/financas-leitor-transacoes-ia
+  DOCKER_HUB_REPOSITORY: jcsouzafirst/financas-leitor-transacoes-ia
 
 jobs:
   build-and-push:
