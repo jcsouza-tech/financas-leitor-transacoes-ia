@@ -1,0 +1,17 @@
+# Flyway Configuration Template
+# This file is used to generate flyway.conf at runtime
+
+flyway.driver=${FLYWAY_DRIVER}
+flyway.url=${FLYWAY_URL}
+flyway.user=${FLYWAY_USER}
+flyway.password=${FLYWAY_PASSWORD}
+flyway.locations=${FLYWAY_LOCATIONS}
+flyway.validateOnMigrate=${FLYWAY_VALIDATE_ON_MIGRATE}
+flyway.cleanDisabled=${FLYWAY_CLEAN_DISABLED}
+flyway.baselineOnMigrate=${FLYWAY_BASELINE_ON_MIGRATE}
+flyway.baselineVersion=${FLYWAY_BASELINE_VERSION}
+flyway.schemas=${FLYWAY_SCHEMAS}
+flyway.table=${FLYWAY_TABLE}
+flyway.outOfOrder=${FLYWAY_OUT_OF_ORDER}
+flyway.placeholders.ENVIRONMENT=${ENVIRONMENT}
+flyway.placeholders.APPLICATION=${APPLICATION}

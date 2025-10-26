@@ -1,0 +1,269 @@
+name: Deploy Application
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'src/main/resources/db/migration/**'
+      - 'Dockerfile.migrations'
+      - 'scripts/**'
+      - '*.md'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+        - dev
+        - hml
+        - prod
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: financas-leitor-transacoes-ia
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "🏗️ Building Docker image..."
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "✅ Image built successfully"
+
+      - name: Push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "📤 Pushing image to ECR..."
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "✅ Image pushed successfully"
+
+  deploy:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set environment variables
+        id: set-env
+        run: |
+          ENV="${{ github.event.inputs.environment || 'prod' }}"
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          
+          # Set cluster and service names based on environment
+          if [ "$ENV" = "dev" ]; then
+            echo "cluster_name=financas-dev-cluster" >> $GITHUB_OUTPUT
+            echo "service_name=financas-leitor-transacoes-ia-dev" >> $GITHUB_OUTPUT
+            echo "subnet_id=subnet-04e2cfbaafb44e61b" >> $GITHUB_OUTPUT
+            echo "secret_arn=financas/leitor-transacoes-ia/dev/database" >> $GITHUB_OUTPUT
+          elif [ "$ENV" = "hml" ]; then
+            echo "cluster_name=financas-hml-cluster" >> $GITHUB_OUTPUT
+            echo "service_name=financas-leitor-transacoes-ia-hml" >> $GITHUB_OUTPUT
+            echo "subnet_id=subnet-04e2cfbaafb44e61b" >> $GITHUB_OUTPUT
+            echo "secret_arn=financas/leitor-transacoes-ia/hml/database" >> $GITHUB_OUTPUT
+          else
+            echo "cluster_name=financas-prod-cluster" >> $GITHUB_OUTPUT
+            echo "service_name=financas-leitor-transacoes-ia" >> $GITHUB_OUTPUT
+            echo "subnet_id=subnet-04e2cfbaafb44e61b" >> $GITHUB_OUTPUT
+            echo "secret_arn=financas/leitor-transacoes-ia/prod/database" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get database credentials
+        id: get-db-creds
+        run: |
+          echo "🔐 Retrieving database credentials..."
+          DB_CREDS=$(aws secretsmanager get-secret-value \
+            --secret-id "${{ steps.set-env.outputs.secret_arn }}" \
+            --query SecretString --output text)
+          
+          echo "DB_HOST=$(echo $DB_CREDS | jq -r '.host')" >> $GITHUB_OUTPUT
+          echo "DB_PORT=$(echo $DB_CREDS | jq -r '.port')" >> $GITHUB_OUTPUT
+          echo "DB_NAME=$(echo $DB_CREDS | jq -r '.database')" >> $GITHUB_OUTPUT
+          echo "DB_USER=$(echo $DB_CREDS | jq -r '.username')" >> $GITHUB_OUTPUT
+
+      - name: Update ECS Task Definition
+        env:
+          ECR_REGISTRY: 772160502222.dkr.ecr.us-east-1.amazonaws.com
+          IMAGE_TAG: ${{ github.sha }}
+          ENVIRONMENT: ${{ steps.set-env.outputs.environment }}
+          CLUSTER_NAME: ${{ steps.set-env.outputs.cluster_name }}
+          SERVICE_NAME: ${{ steps.set-env.outputs.service_name }}
+          DB_HOST: ${{ steps.get-db-creds.outputs.DB_HOST }}
+          DB_PORT: ${{ steps.get-db-creds.outputs.DB_PORT }}
+          DB_NAME: ${{ steps.get-db-creds.outputs.DB_NAME }}
+          DB_USER: ${{ steps.get-db-creds.outputs.DB_USER }}
+          SECRET_ARN: ${{ steps.set-env.outputs.secret_arn }}
+        run: |
+          echo "📝 Updating task definition for $ENVIRONMENT environment..."
+          
+          # Check if service exists
+          if aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --query 'services[0].status' --output text 2>/dev/null | grep -q "ACTIVE"; then
+            echo "✅ Service exists, updating..."
+            
+            # Download current task definition
+            aws ecs describe-task-definition \
+              --task-definition $SERVICE_NAME \
+              --query 'taskDefinition' > task-definition.json
+            
+            # Update image
+            cat task-definition.json | jq ".containerDefinitions[0].image = \"$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG\"" > task-definition-updated.json
+            
+            # Register new task definition
+            aws ecs register-task-definition \
+              --cli-input-json file://task-definition-updated.json
+            
+            echo "✅ Task definition updated"
+          else
+            echo "⚠️ Service does not exist, creating new service..."
+            
+            # Create task definition from template
+            cat > task-definition.json <<EOF
+          {
+            "family": "$SERVICE_NAME",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "512",
+            "memory": "1024",
+            "executionRoleArn": "arn:aws:iam::772160502222:role/ecsTaskExecutionRole",
+            "containerDefinitions": [
+              {
+                "name": "leitor-transacoes-ia",
+                "image": "$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG",
+                "essential": true,
+                "portMappings": [{"containerPort": 8080, "protocol": "tcp"}],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/ecs/$SERVICE_NAME",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                },
+                "environment": [
+                  {"name": "SPRING_PROFILES_ACTIVE", "value": "$ENVIRONMENT"},
+                  {"name": "SPRING_DATASOURCE_URL", "value": "jdbc:mysql://$DB_HOST:$DB_PORT/$DB_NAME"},
+                  {"name": "SPRING_DATASOURCE_USERNAME", "value": "$DB_USER"},
+                  {"name": "FLYWAY_ENABLED", "value": "false"},
+                  {"name": "AI_PROVIDER", "value": "gemini"}
+                ],
+                "secrets": [
+                  {"name": "SPRING_DATASOURCE_PASSWORD", "valueFrom": "arn:aws:secretsmanager:us-east-1:772160502222:secret:$SECRET_ARN"}
+                ]
+              }
+            ]
+          }
+          EOF
+            
+            # Register task definition
+            aws ecs register-task-definition --cli-input-json file://task-definition.json
+            
+            # Create log group
+            aws logs create-log-group --log-group-name /ecs/$SERVICE_NAME --region us-east-1 || true
+            
+            # Create service
+            aws ecs create-service \
+              --cluster $CLUSTER_NAME \
+              --service-name $SERVICE_NAME \
+              --task-definition $SERVICE_NAME \
+              --desired-count 1 \
+              --launch-type FARGATE \
+              --network-configuration "awsvpcConfiguration={subnets=[${{ steps.set-env.outputs.subnet_id }}],securityGroups=[sg-0f74f8203a1b3a3af],assignPublicIp=ENABLED}" \
+              --region us-east-1
+            
+            echo "✅ Service created"
+          fi
+
+      - name: Deploy to ECS
+        env:
+          CLUSTER_NAME: ${{ steps.set-env.outputs.cluster_name }}
+          SERVICE_NAME: ${{ steps.set-env.outputs.service_name }}
+        run: |
+          echo "🚀 Deploying to ECS..."
+          
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Deployment started"
+
+      - name: Wait for deployment
+        env:
+          CLUSTER_NAME: ${{ steps.set-env.outputs.cluster_name }}
+          SERVICE_NAME: ${{ steps.set-env.outputs.service_name }}
+        run: |
+          echo "⏳ Waiting for deployment to complete..."
+          
+          aws ecs wait services-stable \
+            --cluster $CLUSTER_NAME \
+            --services $SERVICE_NAME \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Deployment completed successfully"
+
+      - name: Get service status
+        env:
+          CLUSTER_NAME: ${{ steps.set-env.outputs.cluster_name }}
+          SERVICE_NAME: ${{ steps.set-env.outputs.service_name }}
+        run: |
+          echo "📊 Service status:"
+          aws ecs describe-services \
+            --cluster $CLUSTER_NAME \
+            --services $SERVICE_NAME \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].[status,runningCount,desiredCount]' \
+            --output table
+
+  notify:
+    name: Notify Deployment Results
+    runs-on: ubuntu-latest
+    needs: [build-and-push, deploy]
+    if: always()
+    steps:
+      - name: Notify success
+        if: needs.deploy.result == 'success'
+        run: |
+          echo "✅ Application deployed successfully!"
+          # Add Slack/Teams notification here if needed
+
+      - name: Notify failure
+        if: needs.deploy.result == 'failure'
+        run: |
+          echo "❌ Application deployment failed!"
+          # Add Slack/Teams notification here if needed

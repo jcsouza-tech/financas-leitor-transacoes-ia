@@ -1,0 +1,139 @@
+services:
+  # Infraestrutura básica
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_NAME:-financas_db}
+      MYSQL_USER: ${DB_USERNAME:-appuser}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-apppassword}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    networks:
+      - financas-network
+
+  # ElasticMQ para SQS local
+  elasticmq:
+    image: softwaremill/elasticmq-native:latest
+    container_name: elasticmq
+    ports:
+      - "9324:9324"
+      - "9325:9325"
+    environment:
+      - JAVA_OPTS=-Xmx1g -Xms1g
+    volumes:
+      - elasticmq_data:/opt/elasticmq/data
+    networks:
+      - financas-network
+
+
+  # Stack de observabilidade
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - financas-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - financas-network
+
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: zipkin
+    ports:
+      - "${ZIPKIN_PORT:-9411}:9411"
+    depends_on:
+      - mysql
+    networks:
+      - financas-network
+
+  # Aplicação principal - Leitor Transações IA
+  leitor-transacoes-ia:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: leitor-transacoes-ia
+    ports:
+      - "${LEITOR_IA_PORT:-8080}:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-dev}
+      - AI_PROVIDER=${AI_PROVIDER:-gemini}
+      - AI_API_KEY=${AI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_TIMEOUT=${GEMINI_TIMEOUT:-30000}
+      - GEMINI_MAX_TOKENS=${GEMINI_MAX_TOKENS:-4000}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
+      - OPENAI_TIMEOUT=${OPENAI_TIMEOUT:-30000}
+      - OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS:-4000}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-3-sonnet-20240229}
+      - CLAUDE_TIMEOUT=${CLAUDE_TIMEOUT:-30000}
+      - CLAUDE_MAX_TOKENS=${CLAUDE_MAX_TOKENS:-4000}
+      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL:-jdbc:mysql://mysql:3306/financas_db}
+      - SPRING_DATASOURCE_USERNAME=${SPRING_DATASOURCE_USERNAME:-appuser}
+      - SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD:-apppassword}
+      - FLYWAY_ENABLED=${FLYWAY_ENABLED:-true}
+      # AWS SQS (ElasticMQ para local)
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY=${AWS_ACCESS_KEY:-test}
+      - AWS_SECRET_KEY=${AWS_SECRET_KEY:-test}
+      - AWS_SQS_ENDPOINT=${AWS_SQS_ENDPOINT:-http://elasticmq:9324}
+      - ZIPKIN_BASE_URL=${ZIPKIN_BASE_URL:-http://zipkin:9411}
+      - JAVA_OPTS=${JAVA_OPTS:--Xms512m -Xmx1g}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - financas-network
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  prometheus_data:
+  grafana_data:
+  elasticmq_data:
+
+networks:
+  financas-network:
+    driver: bridge

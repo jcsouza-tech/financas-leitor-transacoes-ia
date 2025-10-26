@@ -1,0 +1,32 @@
+# Dockerfile for Flyway Database Migrations
+# Lightweight container for running migrations in AWS ECS
+
+FROM flyway/flyway:9.22.0-alpine
+
+# Set working directory
+WORKDIR /flyway
+
+# Copy migration scripts
+COPY src/main/resources/db/migration /flyway/sql
+
+# Copy configuration template
+COPY scripts/flyway.conf.template /flyway/conf/flyway.conf.template
+
+# Create entrypoint script
+COPY scripts/entrypoint-migrations.sh /flyway/entrypoint.sh
+RUN chmod +x /flyway/entrypoint.sh
+
+# Set environment variables
+ENV FLYWAY_DRIVER=com.mysql.cj.jdbc.Driver
+ENV FLYWAY_LOCATIONS=filesystem:/flyway/sql
+ENV FLYWAY_VALIDATE_ON_MIGRATE=true
+ENV FLYWAY_CLEAN_DISABLED=true
+ENV FLYWAY_BASELINE_ON_MIGRATE=true
+ENV FLYWAY_BASELINE_VERSION=0
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD flyway info || exit 1
+
+# Default command
+ENTRYPOINT ["/flyway/entrypoint.sh"]

@@ -1,0 +1,96 @@
+server:
+  port: 8080
+
+# Configurações de segurança
+security:
+  enabled: ${SECURITY_ENABLED:false}  # false para desenvolvimento local
+
+spring:
+  config:
+    activate:
+      on-profile: dev
+  application:
+    name: leitor-transacoes-ia
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://mysql_db:3306/financas_db}
+    driverClassName: com.mysql.cj.jdbc.Driver
+    username: ${SPRING_DATASOURCE_USERNAME:appuser}
+    password: ${SPRING_DATASOURCE_PASSWORD:apppassword}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+
+  # Flyway Database Migration Configuration
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: 0
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI:}
+          jwk-set-uri: ${JWT_JWK_SET_URI:}
+
+cloud:
+  aws:
+    region:
+      static: us-east-1
+      sts:
+        enabled: true
+    credentials:
+      access-key: test
+      secret-key: test
+
+# Configurações AWS Cognito
+aws:
+  cognito:
+    user-pool-id: ${AWS_COGNITO_USER_POOL_ID:local-mock}
+    client-id: ${AWS_COGNITO_CLIENT_ID:local-mock}
+    region: us-east-1
+    sqs:
+      endpoint: http://elasticmq:9324
+      queue:
+        auto-create: true
+      listener:
+        auto-startup: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  zipkin:
+    enabled: true
+    base-url: http://zipkin:9411
+  tracing:
+    sampling:
+      probability: 1.0
+
+logging:
+  level:
+    root: INFO
+    br.com.financas.leitor_transacoes_ia: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE

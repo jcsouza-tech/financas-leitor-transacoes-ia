@@ -1,0 +1,220 @@
+name: Database Migrations
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/main/resources/db/migration/**'
+      - 'Dockerfile.migrations'
+      - 'scripts/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/main/resources/db/migration/**'
+      - 'Dockerfile.migrations'
+      - 'scripts/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'hml'
+        type: choice
+        options:
+        - hml
+        - prod
+      action:
+        description: 'Migration action'
+        required: true
+        default: 'migrate'
+        type: choice
+        options:
+        - migrate
+        - validate
+        - info
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: financas-leitor-transacoes-ia
+  MIGRATIONS_IMAGE: migrations
+
+jobs:
+  validate-migrations:
+    name: Validate Migration Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate SQL syntax
+        run: |
+          echo "🔍 Validating SQL migration files..."
+          for file in src/main/resources/db/migration/*.sql; do
+            if [ -f "$file" ]; then
+              echo "Validating $file"
+              # Basic SQL syntax validation
+              if ! grep -q "CREATE\|ALTER\|DROP\|INSERT\|UPDATE\|DELETE" "$file"; then
+                echo "❌ Error: $file does not contain valid SQL statements"
+                exit 1
+              fi
+              echo "✅ $file syntax looks good"
+            fi
+          done
+
+      - name: Check migration versioning
+        run: |
+          echo "🔍 Checking migration versioning..."
+          cd src/main/resources/db/migration
+          versions=($(ls V*.sql | sed 's/V\([0-9]*\)__.*/\1/' | sort -n))
+          echo "Found versions: ${versions[*]}"
+          
+          # Check for gaps in versioning
+          for i in "${!versions[@]}"; do
+            if [ $i -gt 0 ]; then
+              prev=${versions[$((i-1))]}
+              curr=${versions[$i]}
+              if [ $((curr - prev)) -ne 1 ]; then
+                echo "❌ Error: Gap in migration versions between V${prev} and V${curr}"
+                exit 1
+              fi
+            fi
+          done
+          echo "✅ Migration versioning is correct"
+
+  build-migrations-image:
+    name: Build Migrations Docker Image
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push migrations image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "🏗️ Building migrations Docker image..."
+          docker build -f Dockerfile.migrations -t $ECR_REGISTRY/$ECR_REPOSITORY-$MIGRATIONS_IMAGE:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY-$MIGRATIONS_IMAGE:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY-$MIGRATIONS_IMAGE:latest
+          
+          echo "📤 Pushing to ECR..."
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY-$MIGRATIONS_IMAGE:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY-$MIGRATIONS_IMAGE:latest
+
+  run-migrations:
+    name: Execute Database Migrations
+    runs-on: ubuntu-latest
+    needs: build-migrations-image
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    environment: ${{ github.event.inputs.environment || 'hml' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get database credentials
+        id: get-db-creds
+        run: |
+          echo "🔐 Retrieving database credentials from AWS Secrets Manager..."
+          DB_CREDS=$(aws secretsmanager get-secret-value \
+            --secret-id "financas/leitor-transacoes-ia/${{ github.event.inputs.environment || 'hml' }}/database" \
+            --query SecretString --output text)
+          
+          echo "DB_HOST=$(echo $DB_CREDS | jq -r '.host')" >> $GITHUB_OUTPUT
+          echo "DB_PORT=$(echo $DB_CREDS | jq -r '.port')" >> $GITHUB_OUTPUT
+          echo "DB_NAME=$(echo $DB_CREDS | jq -r '.database')" >> $GITHUB_OUTPUT
+          echo "DB_USER=$(echo $DB_CREDS | jq -r '.username')" >> $GITHUB_OUTPUT
+          echo "DB_PASSWORD=$(echo $DB_CREDS | jq -r '.password')" >> $GITHUB_OUTPUT
+
+      - name: Run migrations
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+          FLYWAY_URL: jdbc:mysql://${{ steps.get-db-creds.outputs.DB_HOST }}:${{ steps.get-db-creds.outputs.DB_PORT }}/${{ steps.get-db-creds.outputs.DB_NAME }}
+          FLYWAY_USER: ${{ steps.get-db-creds.outputs.DB_USER }}
+          FLYWAY_PASSWORD: ${{ steps.get-db-creds.outputs.DB_PASSWORD }}
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'hml' }}
+          APPLICATION: leitor-transacoes-ia
+        run: |
+          echo "🚀 Running database migrations..."
+          echo "Environment: $ENVIRONMENT"
+          echo "Database: $FLYWAY_URL"
+          
+          # Run migrations using ECS Task
+          aws ecs run-task \
+            --cluster financas-$ENVIRONMENT-cluster \
+            --task-definition financas-migrations-task \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[subnet-12345],securityGroups=[sg-12345],assignPublicIp=ENABLED}" \
+            --overrides '{
+              "containerOverrides": [{
+                "name": "migrations",
+                "environment": [
+                  {"name": "FLYWAY_URL", "value": "'$FLYWAY_URL'"},
+                  {"name": "FLYWAY_USER", "value": "'$FLYWAY_USER'"},
+                  {"name": "FLYWAY_PASSWORD", "value": "'$FLYWAY_PASSWORD'"},
+                  {"name": "ENVIRONMENT", "value": "'$ENVIRONMENT'"},
+                  {"name": "APPLICATION", "value": "'$APPLICATION'"}
+                ]
+              }]
+            }' \
+            --query 'tasks[0].taskArn' \
+            --output text > task_arn.txt
+          
+          TASK_ARN=$(cat task_arn.txt)
+          echo "📋 Task ARN: $TASK_ARN"
+          
+          # Wait for task completion
+          echo "⏳ Waiting for migration task to complete..."
+          aws ecs wait tasks-stopped --cluster financas-$ENVIRONMENT-cluster --tasks $TASK_ARN
+          
+          # Check task exit code
+          EXIT_CODE=$(aws ecs describe-tasks --cluster financas-$ENVIRONMENT-cluster --tasks $TASK_ARN --query 'tasks[0].containers[0].exitCode' --output text)
+          
+          if [ "$EXIT_CODE" = "0" ]; then
+            echo "✅ Migrations completed successfully!"
+          else
+            echo "❌ Migrations failed with exit code: $EXIT_CODE"
+            exit 1
+          fi
+
+  notify:
+    name: Notify Migration Results
+    runs-on: ubuntu-latest
+    needs: [validate-migrations, run-migrations]
+    if: always()
+    steps:
+      - name: Notify success
+        if: needs.run-migrations.result == 'success'
+        run: |
+          echo "✅ Database migrations completed successfully!"
+          # Add Slack/Teams notification here if needed
+
+      - name: Notify failure
+        if: needs.run-migrations.result == 'failure'
+        run: |
+          echo "❌ Database migrations failed!"
+          # Add Slack/Teams notification here if needed

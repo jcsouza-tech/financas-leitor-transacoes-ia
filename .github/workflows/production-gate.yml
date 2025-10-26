@@ -1,0 +1,163 @@
+name: Production Release Gate
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  DOCKER_IMAGE_NAME: financas-leitor-transacoes-ia
+
+jobs:
+  validate-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Verify tag is on main branch
+      run: |
+        if [ "$(git branch --contains $GITHUB_REF_NAME | grep -c main)" -eq 0 ]; then
+          echo "❌ Tag $GITHUB_REF_NAME is not on main branch"
+          echo "Production releases must be created from main branch"
+          exit 1
+        fi
+        echo "✅ Tag $GITHUB_REF_NAME is on main branch"
+        
+    - name: Check PR approval status
+      id: check-pr-approval
+      run: |
+        # Get the merge commit for this tag
+        MERGE_COMMIT=$(git log --merges --oneline -1 $GITHUB_REF_NAME)
+        echo "Merge commit: $MERGE_COMMIT"
+        
+        # Extract PR number from merge commit message
+        PR_NUMBER=$(echo "$MERGE_COMMIT" | grep -oE "Merge pull request #[0-9]+" | grep -oE "[0-9]+" || echo "")
+        
+        if [ -z "$PR_NUMBER" ]; then
+          echo "⚠️  No PR number found in merge commit. This might be a direct push to main."
+          echo "approval_status=unknown" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        echo "Found PR number: $PR_NUMBER"
+        
+        # Check if PR was approved
+        APPROVAL_STATUS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" | \
+          jq -r '.[] | select(.state == "APPROVED") | .state' | head -1)
+        
+        if [ "$APPROVAL_STATUS" = "APPROVED" ]; then
+          echo "✅ PR #$PR_NUMBER was approved"
+          echo "approval_status=approved" >> $GITHUB_OUTPUT
+        else
+          echo "❌ PR #$PR_NUMBER was not approved"
+          echo "approval_status=not_approved" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Validate PR approval for production
+      if: steps.check-pr-approval.outputs.approval_status == 'not_approved'
+      run: |
+        echo "❌ Production releases require approved PRs"
+        echo "Please ensure the associated PR was approved before creating a production tag"
+        exit 1
+        
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=raw,value=latest
+          
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get commits since last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 $GITHUB_REF_NAME^ 2>/dev/null || echo "")
+        
+        if [ -n "$LAST_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" $LAST_TAG..$GITHUB_REF_NAME)
+        else
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" --max-count=10)
+        fi
+        
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Release ${{ github.ref_name }}
+        body: |
+          ## Changes in this release
+          
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ## Docker Image
+          
+          **Image:** `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.ref_name }}`
+          
+          **Tags:** ${{ steps.meta.outputs.tags }}
+          
+          ## Deployment
+          
+          To deploy this release to production:
+          
+          1. Go to Actions > Deploy to AWS ECS
+          2. Select environment: `prod`
+          3. Enter image tag: `${{ github.ref_name }}`
+          4. Click "Run workflow"
+          
+          ## Verification
+          
+          - ✅ Tag created on main branch
+          - ✅ Associated PR was approved
+          - ✅ Docker image built and pushed
+          - ✅ GitHub release created
+        draft: false
+        prerelease: false
+        
+    - name: Output release details
+      run: |
+        echo "🎉 Production release created successfully!"
+        echo ""
+        echo "Release: ${{ github.ref_name }}"
+        echo "Docker Image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.ref_name }}"
+        echo "Tags: ${{ steps.meta.outputs.tags }}"
+        echo "GitHub Release: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+        echo ""
+        echo "Next steps:"
+        echo "1. Deploy to production using the Deploy to AWS ECS workflow"
+        echo "2. Monitor the deployment in AWS ECS console"
+        echo "3. Verify application health and functionality"
