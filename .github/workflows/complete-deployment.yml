@@ -85,6 +85,26 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
+      - name: Setup AWS credentials on EC2
+        run: |
+          echo "🔐 Configuring AWS credentials on EC2..."
+          
+          ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF || true
+            mkdir -p ~/.aws
+            cat > ~/.aws/credentials << CREDS
+[default]
+aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}
+aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+CREDS
+            cat > ~/.aws/config << CONFIG
+[default]
+region = ${{ env.AWS_REGION }}
+CONFIG
+            chmod 600 ~/.aws/credentials
+            chmod 600 ~/.aws/config
+            echo "✅ AWS credentials configured"
+          EOF
+
       - name: Create database if not exists
         env:
           ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
