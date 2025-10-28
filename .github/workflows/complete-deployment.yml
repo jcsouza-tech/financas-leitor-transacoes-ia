@@ -105,22 +105,7 @@ CONFIG
             echo "✅ AWS credentials configured"
           EOF
 
-      - name: Create database if not exists
-        env:
-          ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
-        run: |
-          echo "🗄️ Creating database if not exists..."
-          
-          # Copy script to EC2
-          scp -i ~/.ssh/id_rsa scripts/create-database.sh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/create-db.sh
-          
-          # Run script on EC2
-          ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF || echo "⚠️ Database might already exist"
-            chmod +x /tmp/create-db.sh
-            /tmp/create-db.sh
-          EOF
-
-      - name: Execute migrations on EC2
+      - name: Create database and run migrations
         env:
           ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
         run: |
@@ -128,9 +113,8 @@ CONFIG
           
           # Copy migration files
           scp -i ~/.ssh/id_rsa -r src/main/resources/db/migration ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/migrations 2>/dev/null || true
-          scp -i ~/.ssh/id_rsa scripts/run-migrations-ec2.sh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/run-migrations.sh 2>/dev/null || true
           
-          # Execute migrations
+          # Execute migrations (tudo inline para debug)
           ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF || true
             set -e
             
@@ -147,12 +131,25 @@ CONFIG
               sudo cp flyway-9.22.0/flyway /usr/local/bin/flyway
             fi
             
-            # Verify AWS credentials are configured
+            # Debug: Check if AWS credentials exist
             echo "🔍 Checking AWS credentials..."
-            aws sts get-caller-identity || echo "⚠️ AWS credentials not configured"
+            ls -la ~/.aws/ || echo "⚠️ ~/.aws/ directory not found"
+            cat ~/.aws/credentials 2>/dev/null || echo "⚠️ No credentials file"
+            
+            # Try to get caller identity
+            echo "Testing AWS CLI..."
+            aws sts get-caller-identity || echo "❌ AWS credentials not working"
             
             # Get database credentials from Secrets Manager
+            echo "Getting database credentials from Secrets Manager..."
             DB_CREDS=\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text)
+            
+            if [ -z "\$DB_CREDS" ]; then
+              echo "❌ Failed to get database credentials"
+              exit 1
+            fi
+            
+            echo "✅ Database credentials retrieved successfully"
             
             export FLYWAY_URL="jdbc:mysql://\$(echo \$DB_CREDS | jq -r '.host'):\$(echo \$DB_CREDS | jq -r '.port')/\$(echo \$DB_CREDS | jq -r '.database')"
             export FLYWAY_USER="\$(echo \$DB_CREDS | jq -r '.username')"
