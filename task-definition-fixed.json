@@ -26,7 +26,7 @@
       },
       "environment": [
         {"name": "SPRING_PROFILES_ACTIVE", "value": "prod"},
-        {"name": "SPRING_DATASOURCE_URL", "value": "jdbc:mysql://financas-prd-mysql.cyr6a800ez9a.us-east-1.rds.amazonaws.com:3306/financas_db"},
+        {"name": "SPRING_DATASOURCE_URL", "value": "jdbc:mysql://financas-prd-mysql.cyr6a800ez9a.us-east-1.rds.amazonaws.com:3306/financas_prd_mysql"},
         {"name": "SPRING_DATASOURCE_USERNAME", "value": "appuser"},
         {"name": "AI_API_KEY", "value": "dummy-key-for-testing"},
         {"name": "FLYWAY_ENABLED", "value": "false"},
@@ -36,7 +36,15 @@
       "secrets": [
         {
           "name": "SPRING_DATASOURCE_PASSWORD", 
-          "valueFrom": "arn:aws:secretsmanager:us-east-1:772160502222:secret:financas/leitor-transacoes-ia/prod/database:password::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:772160502222:secret:financas/leitor-transacoes-ia/prod/database-m1zT3G:password::"
+        },
+        {
+          "name": "DB_HOST", 
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:772160502222:secret:financas/leitor-transacoes-ia/prod/database-m1zT3G:host::"
+        },
+        {
+          "name": "DB_NAME", 
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:772160502222:secret:financas/leitor-transacoes-ia/prod/database-m1zT3G:database::"
         }
       ]
     }

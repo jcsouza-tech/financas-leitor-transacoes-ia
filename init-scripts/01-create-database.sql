@@ -1,7 +1,7 @@
 -- Script de inicialização do banco de dados para Leitor Transações IA
 -- Este script cria as tabelas necessárias para a aplicação
 
-USE financas_db;
+USE financas_prd_mysql;
 
 -- Tabela de transações
 CREATE TABLE IF NOT EXISTS transacoes (

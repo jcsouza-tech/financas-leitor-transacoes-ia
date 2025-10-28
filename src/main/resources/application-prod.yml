@@ -1,10 +1,10 @@
-# Configuração para ambiente de produção (AWS) - SEM SEGURANÇA
+# Configuração para ambiente de produção (AWS)
 server:
   port: 8080
 
-# Configurações de segurança DESABILITADA
+# Configurações de segurança
 security:
-  enabled: false
+  enabled: true
 
 spring:
   application:
@@ -12,7 +12,7 @@ spring:
   main:
     allow-bean-definition-overriding: true
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://financas-prd-mysql.cyr6a800ez9a.us-east-1.rds.amazonaws.com:3306/mysql}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://financas-prd-mysql.cyr6a800ez9a.us-east-1.rds.amazonaws.com:3306/financas_prd_mysql}
     driverClassName: com.mysql.cj.jdbc.Driver
     username: ${SPRING_DATASOURCE_USERNAME:appuser}
     password: ${SPRING_DATASOURCE_PASSWORD}
@@ -24,12 +24,18 @@ spring:
       max-lifetime: 1800000
   jpa:
     hibernate:
-      ddl-auto: create
+      ddl-auto: validate
     show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQL8Dialect
         format_sql: false
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI}
+          jwk-set-uri: ${JWT_JWK_SET_URI}
   # Flyway Database Migration Configuration
   flyway:
     enabled: ${FLYWAY_ENABLED:false}
@@ -49,9 +55,18 @@ cloud:
       sts:
         enabled: true
 
-# Configurações AWS básicas
+# Configurações AWS Cognito para produção
 aws:
-  region: ${AWS_REGION:us-east-1}
+  cognito:
+    user-pool-id: ${AWS_COGNITO_USER_POOL_ID}
+    client-id: ${AWS_COGNITO_CLIENT_ID}
+    region: ${AWS_REGION:us-east-1}
+    sqs:
+      endpoint: ${AWS_SQS_ENDPOINT:}
+      queue:
+        auto-create: true
+      listener:
+        auto-startup: true
 
 management:
   endpoints:
@@ -73,10 +88,7 @@ logging:
   level:
     root: INFO
     br.com.financas.leitor_transacoes_ia: INFO
+    br.com.financas.leitor_transacoes_ia.security: INFO
+    org.springframework.security: INFO
     org.hibernate.SQL: WARN
     org.hibernate.type.descriptor.sql.BasicBinder: WARN
-
-# Configurações de multitenancy
-multitenancy:
-  enabled: true
-  default-user-id: "user-123-hardcoded"
