@@ -33,13 +33,19 @@ fi
 
 # Get database credentials from AWS Secrets Manager
 echo -e "${YELLOW}🔐 Retrieving database credentials from AWS Secrets Manager...${NC}"
+
+# Use credentials from environment or AWS profile
+export AWS_DEFAULT_REGION=${REGION:-us-east-1}
+
 DB_CREDS=$(aws secretsmanager get-secret-value \
     --secret-id "financas/leitor-transacoes-ia/${ENVIRONMENT}/database" \
-    --region $REGION \
+    --region ${REGION:-us-east-1} \
     --query SecretString --output text)
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ Error: Failed to retrieve database credentials${NC}"
+    echo -e "${YELLOW}Debug: AWS credentials check${NC}"
+    aws sts get-caller-identity || echo "❌ AWS CLI not configured"
     exit 1
 fi
 
