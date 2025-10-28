@@ -27,6 +27,8 @@ if [ -z "$DB_HOST" ] || [ -z "$DB_USER" ] || [ -z "$DB_PASSWORD" ]; then
     DB_USER=$(echo $DB_CREDS | jq -r '.username')
     DB_PASSWORD=$(echo $DB_CREDS | jq -r '.password')
     DB_NAME=$(echo $DB_CREDS | jq -r '.database')
+    
+    echo "Database: $DB_NAME"
 else
     DB_NAME="financas_prd_mysql"
 fi
