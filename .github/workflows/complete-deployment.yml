@@ -85,6 +85,21 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
+      - name: Create database if not exists
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
+        run: |
+          echo "🗄️ Creating database if not exists..."
+          
+          # Copy script to EC2
+          scp -i ~/.ssh/id_rsa scripts/create-database.sh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/create-db.sh
+          
+          # Run script on EC2
+          ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF || echo "⚠️ Database might already exist"
+            chmod +x /tmp/create-db.sh
+            /tmp/create-db.sh
+          EOF
+
       - name: Execute migrations on EC2
         env:
           ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
