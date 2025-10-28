@@ -112,15 +112,26 @@ jobs:
               sudo cp flyway-9.22.0/flyway /usr/local/bin/flyway
             fi
             
-            # Get database credentials
-            export FLYWAY_URL="jdbc:mysql://\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text | jq -r '.host'):\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text | jq -r '.port')/\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text | jq -r '.database')"
-            export FLYWAY_USER="\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text | jq -r '.username')"
-            export FLYWAY_PASSWORD="\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text | jq -r '.password')"
+            # Get database credentials from Secrets Manager
+            DB_CREDS=\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text)
+            
+            export FLYWAY_URL="jdbc:mysql://\$(echo \$DB_CREDS | jq -r '.host'):\$(echo \$DB_CREDS | jq -r '.port')/\$(echo \$DB_CREDS | jq -r '.database')"
+            export FLYWAY_USER="\$(echo \$DB_CREDS | jq -r '.username')"
+            export FLYWAY_PASSWORD="\$(echo \$DB_CREDS | jq -r '.password')"
+            export FLYWAY_DRIVER="com.mysql.cj.jdbc.Driver"
+            export FLYWAY_LOCATIONS="filesystem:/tmp/financas-leitor-transacoes-ia/src/main/resources/db/migration"
+            export FLYWAY_VALIDATE_ON_MIGRATE="true"
+            export FLYWAY_BASELINE_ON_MIGRATE="true"
+            export FLYWAY_BASELINE_VERSION="0"
+            export FLYWAY_CLEAN_DISABLED="true"
+            
+            echo "🔐 Database configured: \${FLYWAY_USER}@\$(echo \$DB_CREDS | jq -r '.host')"
             
             # Run migrations
             mkdir -p /tmp/financas-leitor-transacoes-ia/src/main/resources/db/migration
             cp -r /tmp/migrations/* /tmp/financas-leitor-transacoes-ia/src/main/resources/db/migration/ 2>/dev/null || true
             cd /tmp/financas-leitor-transacoes-ia
+            /usr/local/bin/flyway info || echo "ℹ️ No migrations to show"
             /usr/local/bin/flyway migrate || echo "⚠️ Migrations skipped or not needed"
           EOF
 
