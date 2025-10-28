@@ -1,18 +1,7 @@
 name: Database Migrations via EC2
 
 on:
-  push:
-    branches: [ main, develop ]
-    paths:
-      - 'src/main/resources/db/migration/**'
-      - 'Dockerfile.migrations'
-      - 'scripts/**'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'src/main/resources/db/migration/**'
-      - 'Dockerfile.migrations'
-      - 'scripts/**'
+  # Disable automatic runs - use complete-deployment.yml instead
   workflow_dispatch:
     inputs:
       environment:
