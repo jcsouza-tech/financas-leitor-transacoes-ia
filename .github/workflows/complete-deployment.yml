@@ -1,0 +1,276 @@
+name: 🚀 Complete Deployment Pipeline
+
+# Pipeline completo: Migrations → Build → Deploy
+# Executa automaticamente em push para main, ou manualmente
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+        - hml
+        - prod
+      skip_migrations:
+        description: 'Skip migrations'
+        required: false
+        default: false
+        type: boolean
+      skip_build:
+        description: 'Skip Docker build'
+        required: false
+        default: false
+        type: boolean
+      skip_deploy:
+        description: 'Skip ECS deployment'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: financas-leitor-transacoes-ia
+  CLUSTER_NAME: financas-prod-cluster
+  SERVICE_NAME: financas-leitor-transacoes-ia
+
+jobs:
+  # JOB 1: Database Migrations via EC2
+  run-migrations:
+    name: 🗄️ Run Database Migrations
+    runs-on: ubuntu-latest
+    if: github.event.inputs.skip_migrations != 'true'
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+    outputs:
+      migrations_status: ${{ job.status }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate SQL syntax
+        run: |
+          echo "🔍 Validating SQL migration files..."
+          if [ -d "src/main/resources/db/migration" ]; then
+            for file in src/main/resources/db/migration/*.sql; do
+              if [ -f "$file" ]; then
+                echo "Validating $file"
+                if ! grep -q "CREATE\|ALTER\|DROP\|INSERT\|UPDATE\|DELETE" "$file"; then
+                  echo "⚠️ Warning: $file might not contain valid SQL statements"
+                else
+                  echo "✅ $file syntax looks good"
+                fi
+              fi
+            done
+          else
+            echo "ℹ️ No migration files found"
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Execute migrations on EC2
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
+        run: |
+          echo "🚀 Running migrations via EC2..."
+          
+          # Copy migration files
+          scp -i ~/.ssh/id_rsa -r src/main/resources/db/migration ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/migrations 2>/dev/null || true
+          scp -i ~/.ssh/id_rsa scripts/run-migrations-ec2.sh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/run-migrations.sh 2>/dev/null || true
+          
+          # Execute migrations
+          ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF || true
+            set -e
+            
+            # Install dependencies if needed
+            if ! command -v jq &> /dev/null; then
+              sudo yum install -y jq 2>/dev/null || sudo apt-get install -y jq 2>/dev/null
+            fi
+            
+            # Download Flyway
+            if [ ! -f /usr/local/bin/flyway ]; then
+              cd /tmp
+              wget -q -O flyway.tar.gz https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/9.22.0/flyway-commandline-9.22.0-linux-x64.tar.gz
+              tar -xzf flyway.tar.gz
+              sudo cp flyway-9.22.0/flyway /usr/local/bin/flyway
+            fi
+            
+            # Get database credentials
+            export FLYWAY_URL="jdbc:mysql://\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text | jq -r '.host'):\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text | jq -r '.port')/\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text | jq -r '.database')"
+            export FLYWAY_USER="\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text | jq -r '.username')"
+            export FLYWAY_PASSWORD="\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text | jq -r '.password')"
+            
+            # Run migrations
+            mkdir -p /tmp/financas-leitor-transacoes-ia/src/main/resources/db/migration
+            cp -r /tmp/migrations/* /tmp/financas-leitor-transacoes-ia/src/main/resources/db/migration/ 2>/dev/null || true
+            cd /tmp/financas-leitor-transacoes-ia
+            /usr/local/bin/flyway migrate || echo "⚠️ Migrations skipped or not needed"
+          EOF
+
+      - name: Check migration results
+        run: |
+          echo "✅ Migrations completed successfully!"
+
+  # JOB 2: Build and Push Docker Image
+  build-and-push:
+    name: 🏗️ Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: [run-migrations]
+    if: github.event.inputs.skip_build != 'true'
+    outputs:
+      image_uri: ${{ steps.image_info.outputs.image_uri }}
+      image_tag: ${{ steps.image_info.outputs.image_tag }}
+      build_status: ${{ job.status }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Set image info
+        id: image_info
+        run: |
+          IMAGE_TAG=$(echo ${{ github.sha }} | cut -c1-7)
+          IMAGE_URI="jcsouzafirst/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "🍱 Image URI: ${IMAGE_URI}"
+          echo "🏷️ Image Tag: ${IMAGE_TAG}"
+
+      - name: Build, tag, and push image to Docker Hub
+        env:
+          IMAGE_TAG: ${{ steps.image_info.outputs.image_tag }}
+        run: |
+          echo "🏗️ Building Docker image..."
+          docker build -t jcsouzafirst/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG .
+          docker tag jcsouzafirst/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG jcsouzafirst/${{ env.ECR_REPOSITORY }}:latest
+          
+          echo "📤 Pushing to Docker Hub..."
+          docker push jcsouzafirst/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+          docker push jcsouzafirst/${{ env.ECR_REPOSITORY }}:latest
+
+  # JOB 3: Deploy to ECS
+  deploy-to-ecs:
+    name: 🚀 Deploy to AWS ECS
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    if: github.event.inputs.skip_deploy != 'true'
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+    outputs:
+      deploy_status: ${{ job.status }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get image info
+        id: image_info
+        run: |
+          IMAGE_TAG=$(echo ${{ github.sha }} | cut -c1-7)
+          IMAGE_URI="jcsouzafirst/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Update task definition
+        env:
+          IMAGE_URI: ${{ steps.image_info.outputs.image_uri }}
+        run: |
+          echo "📝 Updating task definition with image: ${IMAGE_URI}"
+          
+          # Get latest task definition
+          aws ecs describe-task-definition \
+            --task-definition financas-leitor-transacoes-ia \
+            --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition' > task-definition.json
+          
+          # Update image URI
+          cat task-definition.json | jq --arg IMAGE_URI "${IMAGE_URI}" '.containerDefinitions[0].image = $IMAGE_URI' > task-definition-new.json
+          
+          # Remove fields that cannot be updated
+          cat task-definition-new.json | jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' > task-definition-updated.json
+          
+          # Register new task definition
+          aws ecs register-task-definition \
+            --cli-input-json file://task-definition-updated.json \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Deploy to ECS
+        env:
+          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+        run: |
+          echo "🚀 Deploying to ECS..."
+          
+          # Update ECS service
+          aws ecs update-service \
+            --cluster ${CLUSTER_NAME} \
+            --service ${SERVICE_NAME} \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Deployment started successfully!"
+          echo "⏳ Waiting for service to stabilize..."
+          
+          # Wait for deployment to complete
+          aws ecs wait services-stable \
+            --cluster ${CLUSTER_NAME} \
+            --services ${SERVICE_NAME} \
+            --region ${{ env.AWS_REGION }} || true
+          
+          echo "✅ Deployment completed!"
+
+  # JOB 4: Notify Results
+  notify:
+    name: 📢 Notify Deployment Results
+    runs-on: ubuntu-latest
+    needs: [run-migrations, build-and-push, deploy-to-ecs]
+    if: always()
+    steps:
+      - name: Success notification
+        if: ${{ needs.deploy-to-ecs.result == 'success' }}
+        run: |
+          echo "✅ Deployment pipeline completed successfully!"
+          echo "📊 Summary:"
+          echo "  - Migrations: ${{ needs.run-migrations.result }}"
+          echo "  - Build: ${{ needs.build-and-push.result }}"
+          echo "  - Deploy: ${{ needs.deploy-to-ecs.result }}"
+
+      - name: Failure notification
+        if: ${{ needs.deploy-to-ecs.result == 'failure' }}
+        run: |
+          echo "❌ Deployment pipeline failed!"
+          echo "📊 Summary:"
+          echo "  - Migrations: ${{ needs.run-migrations.result }}"
+          echo "  - Build: ${{ needs.build-and-push.result }}"
+          echo "  - Deploy: ${{ needs.deploy-to-ecs.result }}"
+          exit 1

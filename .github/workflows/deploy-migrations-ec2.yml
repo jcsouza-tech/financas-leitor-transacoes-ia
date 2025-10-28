@@ -1,0 +1,178 @@
+name: Database Migrations via EC2
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/main/resources/db/migration/**'
+      - 'Dockerfile.migrations'
+      - 'scripts/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/main/resources/db/migration/**'
+      - 'Dockerfile.migrations'
+      - 'scripts/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+        - hml
+        - prod
+      action:
+        description: 'Migration action'
+        required: true
+        default: 'migrate'
+        type: choice
+        options:
+        - migrate
+        - validate
+        - info
+
+env:
+  AWS_REGION: us-east-1
+  EC2_HOST: ${{ secrets.EC2_HOST }}
+  EC2_USER: ${{ secrets.EC2_USER }}
+  EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+
+jobs:
+  validate-migrations:
+    name: Validate Migration Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate SQL syntax
+        run: |
+          echo "🔍 Validating SQL migration files..."
+          for file in src/main/resources/db/migration/*.sql; do
+            if [ -f "$file" ]; then
+              echo "Validating $file"
+              # Basic SQL syntax validation
+              if ! grep -q "CREATE\|ALTER\|DROP\|INSERT\|UPDATE\|DELETE" "$file"; then
+                echo "❌ Error: $file does not contain valid SQL statements"
+                exit 1
+              fi
+              echo "✅ $file syntax looks good"
+            fi
+          done
+
+  run-migrations-via-ec2:
+    name: Execute Database Migrations via EC2
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Install dependencies on EC2
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'EOF'
+            # Install jq if not present
+            if ! command -v jq &> /dev/null; then
+              echo "📦 Installing jq..."
+              sudo yum install -y jq 2>/dev/null || sudo apt-get install -y jq 2>/dev/null
+            fi
+            
+            # Install AWS CLI if not present
+            if ! command -v aws &> /dev/null; then
+              echo "📦 Installing AWS CLI..."
+              curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+              unzip awscliv2.zip
+              sudo ./aws/install
+            fi
+          EOF
+
+      - name: Copy migration files to EC2
+        run: |
+          echo "📤 Copying migration files to EC2..."
+          scp -i ~/.ssh/id_rsa -r src/main/resources/db/migration ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/migrations
+          scp -i ~/.ssh/id_rsa scripts/run-migrations-ec2.sh ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/run-migrations.sh
+
+      - name: Execute migrations on EC2
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
+          ACTION: ${{ github.event.inputs.action || 'migrate' }}
+          FLYWAY_VERSION: "9.22.0"
+        run: |
+          echo "🚀 Executing migrations on EC2..."
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << EOF
+            set -e
+            
+            cd /tmp
+            
+            # Download and install Flyway if not present
+            if ! command -v flyway &> /dev/null; then
+              echo "📦 Installing Flyway..."
+              wget -q -O flyway.tar.gz https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/${FLYWAY_VERSION}/flyway-commandline-${FLYWAY_VERSION}-linux-x64.tar.gz
+              tar -xzf flyway.tar.gz
+              export PATH=\$PATH:\$(pwd)/flyway-${FLYWAY_VERSION}
+            fi
+            
+            # Make script executable
+            chmod +x /tmp/run-migrations.sh
+            
+            # Set environment variables
+            export ENVIRONMENT=${ENVIRONMENT}
+            export ACTION=${ACTION}
+            export AWS_REGION=${AWS_REGION}
+            
+            # Create migrations directory structure
+            mkdir -p /tmp/financas-leitor-transacoes-ia/src/main/resources/db/migration
+            cp -r /tmp/migrations/* /tmp/financas-leitor-transacoes-ia/src/main/resources/db/migration/
+            
+            # Run migrations
+            cd /tmp/financas-leitor-transacoes-ia
+            /tmp/run-migrations.sh || exit 1
+            
+            # Cleanup
+            rm -rf /tmp/migrations /tmp/run-migrations.sh /tmp/financas-leitor-transacoes-ia
+          EOF
+
+      - name: Check migration results
+        if: failure()
+        run: |
+          echo "❌ Migrations failed! Getting EC2 logs..."
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "journalctl -u flyway || echo 'No systemd service found'"
+
+  notify:
+    name: Notify Migration Results
+    runs-on: ubuntu-latest
+    needs: [validate-migrations, run-migrations-via-ec2]
+    if: always()
+    steps:
+      - name: Notify success
+        if: needs.run-migrations-via-ec2.result == 'success'
+        run: |
+          echo "✅ Database migrations completed successfully!"
+          # Add Slack/Teams notification here if needed
+
+      - name: Notify failure
+        if: needs.run-migrations-via-ec2.result == 'failure'
+        run: |
+          echo "❌ Database migrations failed!"
+          # Add Slack/Teams notification here if needed
+          exit 1
