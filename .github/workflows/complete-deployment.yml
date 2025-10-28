@@ -147,6 +147,10 @@ CONFIG
               sudo cp flyway-9.22.0/flyway /usr/local/bin/flyway
             fi
             
+            # Verify AWS credentials are configured
+            echo "🔍 Checking AWS credentials..."
+            aws sts get-caller-identity || echo "⚠️ AWS credentials not configured"
+            
             # Get database credentials from Secrets Manager
             DB_CREDS=\$(aws secretsmanager get-secret-value --secret-id 'financas/leitor-transacoes-ia/${ENVIRONMENT}/database' --query SecretString --output text)
             
