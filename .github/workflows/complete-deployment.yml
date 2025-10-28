@@ -88,25 +88,14 @@ jobs:
       - name: Setup AWS credentials on EC2
         run: |
           echo "🔐 Configuring AWS credentials on EC2..."
-          
-          # Create credentials file
-          cat > /tmp/aws-credentials << 'CREDS'
-          [default]
-          aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-CREDS
-          
-          # Create config file
-          cat > /tmp/aws-config << 'CONFIG'
-          [default]
-          region = ${{ env.AWS_REGION }}
-CONFIG
-          
-          # Copy to EC2
+          mkdir -p ~/.aws
+          echo "[default]" > /tmp/aws-credentials
+          echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> /tmp/aws-credentials
+          echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> /tmp/aws-credentials
+          echo "[default]" > /tmp/aws-config
+          echo "region = ${{ env.AWS_REGION }}" >> /tmp/aws-config
           scp -i ~/.ssh/id_rsa /tmp/aws-credentials ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/.aws/credentials
           scp -i ~/.ssh/id_rsa /tmp/aws-config ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/.aws/config
-          
-          # Set permissions
           ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "mkdir -p ~/.aws && chmod 600 ~/.aws/credentials ~/.aws/config && echo '✅ AWS credentials configured'"
 
       - name: Create database and run migrations
